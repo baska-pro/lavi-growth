@@ -36,6 +36,7 @@ export interface QueueItem extends StoredQueueItem {
 
 const DB_CONFIG_KEY = 'LAVI_DB_CONFIG';
 const LEGACY_QUEUE_KEY = 'LAVI_SYNC_QUEUE';
+const QUEUE_COUNT_KEY = 'LAVI_SYNC_QUEUE_COUNT';
 const MAX_RETRIES = 5;
 const RETRY_BASE_MS = 15_000;
 let isProcessingQueue = false;
@@ -160,16 +161,19 @@ export const addToQueue = async (action: QueueAction, payload: any, pin: string)
     status: 'pending'
   };
   await putQueueItem(item);
+  localStorage.setItem(QUEUE_COUNT_KEY, String(getQueueLength() + 1));
   if (isOnline()) await processQueueFIFO();
   return id;
 };
 
 export const getQueueStatus = async () => {
   await migrateLegacyQueue();
-  return getQueueCounts();
+  const status = await getQueueCounts();
+  localStorage.setItem(QUEUE_COUNT_KEY, String(status.total));
+  return status;
 };
 
-export const getQueueLength = async (): Promise<number> => (await getQueueStatus()).total;
+export const getQueueLength = (): number => Number(localStorage.getItem(QUEUE_COUNT_KEY) || 0);
 
 export const retryFailedQueue = async (): Promise<number> => {
   await migrateLegacyQueue();
@@ -269,6 +273,8 @@ export const processQueueFIFO = async (): Promise<void> => {
 
       if (success) {
         await deleteQueueItem(item.id);
+        const status = await getQueueCounts();
+        localStorage.setItem(QUEUE_COUNT_KEY, String(status.total));
         continue;
       }
 

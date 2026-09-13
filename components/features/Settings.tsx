@@ -46,8 +46,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return;
     }
 
-    if (newPin.length < 4) {
-      if(onShowToast) onShowToast("PIN baru minimal 4 angka", "error");
+    if (!/^\d{6,12}$/.test(newPin)) {
+      if(onShowToast) onShowToast("PIN baru harus 6-12 angka", "error");
       return;
     }
 
@@ -161,7 +161,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         type="password" 
                         value={oldPin} 
                         onChange={e => setOldPin(e.target.value)} 
-                        placeholder="****"
+                        placeholder="PIN lama" inputMode="numeric" autoComplete="current-password"
                         disabled={isLoading || isOfflineMode}
                         className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-50 transition-all font-mono tracking-widest"
                       />
@@ -175,7 +175,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         type="password" 
                         value={newPin} 
                         onChange={e => setNewPin(e.target.value)} 
-                        placeholder="****"
+                        placeholder="6-12 angka" inputMode="numeric" autoComplete="new-password" maxLength={12}
                         disabled={isLoading || isOfflineMode}
                         className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-50 transition-all font-mono tracking-widest"
                       />
@@ -199,7 +199,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </Button>
 
             <p className="text-[11px] text-gray-400 text-center italic leading-relaxed">
-              {isOfflineMode ? "Fitur ini tidak tersedia dalam Mode Offline." : "*PIN digunakan untuk sinkronisasi data antar perangkat."}
+              {isOfflineMode ? "Fitur ini tidak tersedia dalam Mode Offline." : "*PIN baru wajib 6-12 angka. Server menyimpan hash PIN, bukan PIN asli."}
             </p>
           </div>
         </section>

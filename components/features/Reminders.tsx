@@ -154,7 +154,7 @@ export const RemindersView: React.FC<RemindersViewProps> = ({ reminders, profile
             time,
             days: finalDays,
             specificDate: finalSpecificDate,
-            active: true, // WAJIB TRUE SAAT BUAT BARU
+            active: editingId ? (reminders.find(r => r.id === editingId)?.active ?? true) : true,
             type
         };
 
