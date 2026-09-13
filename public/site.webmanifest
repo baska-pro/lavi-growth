@@ -1,0 +1,17 @@
+{
+  "name": "Lavi Growth",
+  "short_name": "Lavi Growth",
+  "description": "Local-first family health tracker.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#059669",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

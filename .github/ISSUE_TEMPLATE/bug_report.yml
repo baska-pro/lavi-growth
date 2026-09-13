@@ -1,0 +1,46 @@
+name: Bug report
+description: Laporkan perilaku yang salah atau error yang dapat direproduksi.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Jangan sertakan PIN, token, credential, foto pribadi, atau data kesehatan nyata.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Ringkasan masalah
+      description: Jelaskan masalah secara singkat dan jelas.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Langkah reproduksi
+      placeholder: |
+        1. Buka ...
+        2. Pilih ...
+        3. Terjadi ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Hasil yang diharapkan
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, OS, device, versi/commit.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Pemeriksaan privasi
+      options:
+        - label: Saya sudah menghapus secret, credential, dan data pribadi dari laporan.
+          required: true

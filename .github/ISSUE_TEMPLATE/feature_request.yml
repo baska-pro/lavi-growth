@@ -1,0 +1,29 @@
+name: Feature request
+description: Usulkan peningkatan yang konkret dan dapat diuji.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Masalah yang ingin diselesaikan
+      description: Jelaskan kebutuhan pengguna, bukan hanya bentuk UI yang diinginkan.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Usulan solusi
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatif yang dipertimbangkan
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Dampak data
+      options:
+        - label: Usulan ini tidak membutuhkan secret atau data kesehatan nyata pada issue.
+          required: true
