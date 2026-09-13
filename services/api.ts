@@ -9,8 +9,9 @@ import {
   testSupabaseConnection 
 } from "./supabaseService";
 
-// URL Deployment GAS V6.2 (Default Spreadsheet backend)
-export const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbyV2xAdGjjI48JnqGBeJYRSG7Q125GZymCpHnJOtyMcaBpIIMvf1YhUd1eTsBAHHZgF/exec";
+// Intentionally empty for public releases. Configure your own Google Apps Script
+// Web App URL from the in-app database settings before enabling cloud sync.
+export const DEFAULT_GAS_URL = "";
 
 // --- TYPES ---
 export interface ApiResponse<T = any> {
@@ -81,6 +82,9 @@ export const saveDatabaseConfig = (config: DatabaseConfig): void => {
 // Test GAS connection
 export const testGasConnection = async (webAppUrl: string): Promise<{ success: boolean; message: string }> => {
   const url = webAppUrl.trim() || DEFAULT_GAS_URL;
+  if (!url) {
+    return { success: false, message: 'URL Web App Google Apps Script belum dikonfigurasi.' };
+  }
   if (!url.startsWith('https://script.google.com/')) {
     return { success: false, message: 'URL Web App GAS harus diawali dengan https://script.google.com/' };
   }
@@ -228,10 +232,13 @@ export const pullFromCloud = async (pin: string): Promise<AppState | null> => {
     return await pullFromSupabase(config.supabase, pin);
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return null;
+
   // Fallback to GAS (Google Apps Script)
   try {
     const payload = { action: 'sync_pull', pin };
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     
     if (!response.ok) {
       throw new Error(`HTTP Error ${response.status}`);
@@ -269,6 +276,9 @@ const executePush = async (data: Partial<AppState>, pin: string): Promise<boolea
     return await pushToSupabase(config.supabase, data, pin);
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return false;
+
   // Fallback to GAS (Google Apps Script)
   try {
     const profiles = data.profiles ? await processPhotos(data.profiles, pin, 'profile') : undefined;
@@ -288,7 +298,7 @@ const executePush = async (data: Partial<AppState>, pin: string): Promise<boolea
       }
     };
 
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     const result = await response.json();
     return result.status === 'success';
   } catch (e) {
@@ -304,9 +314,12 @@ const executeDelete = async (type: string, id: string, pin: string): Promise<boo
     return await deleteFromSupabase(config.supabase, type as any, id, pin);
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return false;
+
   try {
     const payload = { action: 'delete_data', pin, type, id };
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     const result = await response.json();
     return result.status === 'success';
   } catch (e) {
@@ -357,6 +370,9 @@ export const uploadImageToDrive = async (base64Data: string, pin: string, fileNa
     return base64Data;
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return null;
+
   try {
     const payload = {
       action: 'upload_image',
@@ -364,7 +380,7 @@ export const uploadImageToDrive = async (base64Data: string, pin: string, fileNa
       fileData: base64Data,
       fileName: `${fileName}_${Date.now()}.jpg`
     };
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     const result = await response.json();
     return result.status === 'success' ? result.url : null;
   } catch (e) { return null; }
@@ -377,9 +393,12 @@ export const checkPinOnServer = async (pin: string): Promise<boolean> => {
     return await checkPinOnSupabase(config.supabase, pin);
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return false;
+
   try {
     const payload = { action: 'check_pin', pin };
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     const result = await response.json();
     return result.status === 'success' && result.valid;
   } catch { return false; }
@@ -392,9 +411,12 @@ export const updatePinOnServer = async (newPin: string, oldPin: string): Promise
     return await updatePinOnSupabase(config.supabase, newPin, oldPin);
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return false;
+
   try {
     const payload = { action: 'update_pin', pin: oldPin, newPin };
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     const result = await response.json();
     return result.status === 'success';
   } catch { return false; }
@@ -407,9 +429,12 @@ export const resetServerData = async (pin: string): Promise<boolean> => {
     return await resetSupabaseData(config.supabase, pin);
   }
 
+  const gasUrl = getActiveGasUrl();
+  if (!gasUrl) return false;
+
   try {
     const payload = { action: 'reset_data', pin };
-    const response = await fetch(getActiveGasUrl(), getFetchOptions(payload));
+    const response = await fetch(gasUrl, getFetchOptions(payload));
     const result = await response.json();
     return result.status === 'success';
   } catch { return false; }
