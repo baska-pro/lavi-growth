@@ -1,13 +1,18 @@
 {
-  "name": "lavi-growth-pro-v2",
+  "name": "lavi-growth",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
+  "description": "Family health and growth tracking application with local-first storage and optional cloud synchronization.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "npm run typecheck"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
