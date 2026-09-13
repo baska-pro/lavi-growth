@@ -1,0 +1,12 @@
+{
+  "name": "Lavi Growth Pro v2",
+  "description": "A comprehensive, privacy-first family health tracking application with multi-profile support, context-aware inputs, clinical growth charts, and secure local data management.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
