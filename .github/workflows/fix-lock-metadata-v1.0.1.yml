@@ -1,0 +1,44 @@
+name: Normalize v1.0.1 Lock Metadata
+
+on:
+  push:
+    branches:
+      - fix/security-data-v1.0.1
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/security-data-v1.0.1
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Normalize and verify lockfile
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('bun.lock')
+          text = p.read_text()
+          old = '"name": "lavi-growth-pro-v2"'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one legacy workspace name, found {text.count(old)}')
+          p.write_text(text.replace(old, '"name": "lavi-growth"', 1))
+          Path('.github/workflows/fix-lock-metadata-v1.0.1.yml').unlink()
+          PY
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run build
+      - name: Commit lock metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: align Bun lockfile metadata"
+          git push origin HEAD:fix/security-data-v1.0.1
