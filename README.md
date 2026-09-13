@@ -5,7 +5,7 @@
 
   **Family health tracker yang local-first, responsif, dan dapat disinkronkan ke backend milik sendiri.**
 
-  [![Version](https://img.shields.io/badge/version-1.0.0-059669?style=flat-square)](CHANGELOG.md)
+  [![Version](https://img.shields.io/badge/version-1.0.1-059669?style=flat-square)](CHANGELOG.md)
   [![CI](https://img.shields.io/github/actions/workflow/status/baska-pro/lavi-growth/ci.yml?branch=main&style=flat-square&label=CI)](../../actions/workflows/ci.yml)
   [![License](https://img.shields.io/badge/license-BASKA--PRO%20Personal%20Use-334155?style=flat-square)](LICENSE)
   [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -16,7 +16,7 @@
 
 Lavi Growth adalah aplikasi web untuk membantu pencatatan kesehatan keluarga dalam satu antarmuka. Aplikasi mendukung profil bayi, anak, dewasa, lansia, dan kehamilan; pencatatan metrik kesehatan; pengingat; jurnal; galeri; statistik; data menstruasi; serta backup dan sinkronisasi opsional.
 
-Aplikasi dirancang **local-first**: data dapat digunakan dari browser tanpa akun. Sinkronisasi cloud bersifat opsional dan dikendalikan oleh konfigurasi backend pengguna.
+Aplikasi dirancang **local-first**: data utama disimpan di IndexedDB browser dan tetap dapat digunakan tanpa akun. Sinkronisasi cloud bersifat opsional dan dikendalikan oleh konfigurasi backend pengguna.
 
 > **Penting:** Lavi Growth bukan alat diagnosis dan bukan pengganti konsultasi dokter, bidan, apoteker, atau tenaga kesehatan profesional.
 
@@ -25,11 +25,12 @@ Aplikasi dirancang **local-first**: data dapat digunakan dari browser tanpa akun
 - Multi-profile keluarga: bayi, anak, dewasa, lansia, dan kehamilan.
 - Catatan berat, tinggi, suhu, denyut jantung, tekanan darah, gula darah, lingkar tubuh, tidur, gejala, catatan, serta foto.
 - Statistik, target kesehatan, galeri, jurnal, pengingat, imunisasi, milestone tumbuh-kembang, dan siklus menstruasi.
-- Daily briefing dan notifikasi browser.
-- Export/import backup JSON, export Excel, dan PDF.
-- Mode gelap, tampilan mobile, dan dukungan offline-first queue.
-- Backend default berbasis Google Apps Script/Spreadsheet yang dapat diganti pengguna.
-- Integrasi Supabase tersedia untuk lingkungan yang dikontrol sendiri, dengan catatan keamanan pada [SECURITY.md](SECURITY.md).
+- Daily briefing dan notifikasi browser melalui service worker.
+- Reminder berulang maupun tanggal tertentu.
+- Export/import backup JSON terversi, export Excel, dan PDF.
+- Mode gelap, tampilan mobile, PWA offline cache, dan queue sinkronisasi tahan gagal.
+- Backend Google Apps Script/Spreadsheet yang dapat dikonfigurasi sendiri.
+- Integrasi Supabase melalui RPC terproteksi, PIN ter-hash, rate limit, dan tanpa akses tabel langsung untuk role browser.
 - Referensi eksternal non-diagnostik melalui Open Food Facts, OpenStreetMap/Nominatim, OpenFDA, dan Wikipedia.
 
 ## Stack
@@ -41,7 +42,8 @@ Aplikasi dirancang **local-first**: data dapat digunakan dari browser tanpa akun
 | Chart | Recharts |
 | Export | jsPDF, jsPDF-AutoTable, html2canvas |
 | Backend opsional | Google Apps Script / Supabase |
-| Storage lokal | Web Storage / browser APIs |
+| Storage lokal | IndexedDB + Web Storage untuk konfigurasi ringan |
+| PWA | Service Worker + Web App Manifest |
 
 ## Menjalankan lokal
 
@@ -88,19 +90,19 @@ Panduan deployment tersedia di [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ```text
 .
-├── .github/                 # CI, template issue/PR, CODEOWNERS, Dependabot
+├── .github/                 # CI, release automation, issue/PR templates, Dependabot
 ├── assets/                  # Banner dan aset dokumentasi
 ├── components/              # Komponen UI dan fitur
 ├── data/                    # Data referensi aplikasi
 ├── docs/                    # Panduan pengguna, arsitektur, deployment, keamanan backend
-├── public/                  # Favicon, manifest, robots
-├── services/                # Adapter backend dan external API
+├── public/                  # Favicon, manifest, robots, service worker
+├── services/                # Adapter backend, IndexedDB, external API
 ├── App.tsx                  # Orkestrasi aplikasi
 ├── ScriptGAS.gs             # Backend Google Apps Script
 ├── index.html               # Entry HTML
-├── index.tsx                # React bootstrap
+├── index.tsx                # React bootstrap + state hydration + PWA registration
 ├── types.ts                 # Type definitions
-├── utils.ts                 # Utility aplikasi
+├── utils.ts                 # Utility, backup, dan state persistence
 └── package.json             # Scripts, dependency, version
 ```
 
@@ -108,16 +110,16 @@ Panduan deployment tersedia di [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Lavi Growth dapat berjalan secara lokal tanpa backend. Untuk sinkronisasi lintas perangkat, gunakan backend milik sendiri dan baca [docs/DATABASES.md](docs/DATABASES.md) terlebih dahulu.
 
-**Jangan menaruh secret, service-role key, password, token, atau kredensial pribadi ke repository.** Anon/public key Supabase bukan service-role key, tetapi skema keamanan tetap harus dikonfigurasi dengan benar.
+**Jangan menaruh secret, service-role key, password, token, PIN nyata, atau kredensial pribadi ke repository.** Supabase hanya membutuhkan anon/public key di frontend; data tetap dilindungi melalui fungsi RPC server-side dan tabel tidak diberikan akses langsung kepada role browser.
 
 ## Privasi & keamanan
 
 Data kesehatan dapat bersifat sangat sensitif. Sebelum menggunakan aplikasi dengan data nyata:
 
-1. pahami penyimpanan browser yang digunakan;
-2. gunakan perangkat dan browser yang terlindungi;
+1. lindungi perangkat, browser, dan akun OS;
+2. ganti PIN awal dan gunakan PIN 6-12 digit;
 3. backup secara berkala;
-4. jangan menggunakan konfigurasi database publik yang memberi akses anonim penuh;
+4. gunakan schema Supabase v1.0.1 terbaru atau GAS backend v9.0 terbaru;
 5. tinjau [SECURITY.md](SECURITY.md) dan [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## Dokumentasi
