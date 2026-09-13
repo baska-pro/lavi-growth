@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { hydrateStateCache } from './utils';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -8,11 +9,17 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+
+const bootstrap = async () => {
+  await hydrateStateCache();
+  root.render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+};
+
+void bootstrap();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
