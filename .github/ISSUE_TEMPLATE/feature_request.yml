@@ -1,0 +1,23 @@
+name: Feature request
+description: Usulkan peningkatan yang relevan untuk Lavi Growth
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Masalah atau kebutuhan
+      description: Jelaskan masalah yang ingin diselesaikan.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solusi yang diusulkan
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatif
+      description: Jelaskan alternatif yang sudah dipertimbangkan bila ada.

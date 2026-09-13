@@ -18,7 +18,5 @@ Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 ### Changed
 - Nama paket dinormalkan menjadi `lavi-growth`.
 - Versi proyek ditetapkan ke `1.0.0`.
-- README lama diganti dengan dokumentasi proyek yang independen.
-
-### Removed
-- Metadata dan referensi yang terkait AI Studio/Gemini.
+- README lama diganti dengan dokumentasi proyek mandiri.
+- Metadata generator lama dibersihkan dari repository.
