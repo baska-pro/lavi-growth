@@ -1,7 +1,7 @@
 
 /**
  * ============================================================
- * LAVI GROWTH TRACKER - BACKEND V8.0 (Fix Date Timezone Bug)
+ * LAVI GROWTH TRACKER - BACKEND V9.0 (Hashed PIN + Rate Limit)
  * ============================================================
  */
 
@@ -16,7 +16,9 @@ const CONFIG = {
     MENSTRUAL: "DB_Menstrual"
   },
   DRIVE_FOLDER_NAME: "Lavi_Growth_Images",
-  DEFAULT_PIN: "1234",
+  PIN_MIN_LENGTH: 6,
+  MAX_FAILED_ATTEMPTS: 5,
+  LOCK_MINUTES: 5,
   HEADERS: {
     PROFILES: ["id", "name", "type", "dob", "gender", "avatar", "is_pregnant", "last_updated", "created_at"],
     RECORDS: ["id", "profile_id", "date_time", "weight", "height", "temp", "head_circ", "notes", "symptoms", "photos", "details_json", "last_updated", "created_at"],
@@ -28,10 +30,37 @@ const CONFIG = {
   }
 };
 
+function pinSalt(props) {
+  let salt = props.getProperty('PIN_SALT');
+  if (!salt) { salt = Utilities.getUuid() + Utilities.getUuid(); props.setProperty('PIN_SALT', salt); }
+  return salt;
+}
+function hashPin(pin, props) {
+  const input = pinSalt(props) + ':' + String(pin);
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input, Utilities.Charset.UTF_8);
+  return bytes.map(function(b) { const v = b < 0 ? b + 256 : b; return ('0' + v.toString(16)).slice(-2); }).join('');
+}
+function setPinHash(pin, props) { props.setProperty('APP_PIN_HASH', hashPin(pin, props)); props.deleteProperty('APP_PIN'); clearPinFailures(props); }
+function verifyPin(pin, props) { const stored = props.getProperty('APP_PIN_HASH'); return !!stored && stored === hashPin(pin, props); }
+function migrateLegacyPin(props) { const legacy = props.getProperty('APP_PIN'); if (legacy && !props.getProperty('APP_PIN_HASH')) setPinHash(String(legacy), props); }
+function isPinLocked(props) { return Number(props.getProperty('PIN_LOCKED_UNTIL') || 0) > Date.now(); }
+function clearPinFailures(props) { props.setProperty('PIN_FAILED_ATTEMPTS', '0'); props.deleteProperty('PIN_LOCKED_UNTIL'); }
+function recordPinFailure(props) {
+  let attempts = Number(props.getProperty('PIN_FAILED_ATTEMPTS') || 0) + 1;
+  if (attempts >= CONFIG.MAX_FAILED_ATTEMPTS) { props.setProperty('PIN_FAILED_ATTEMPTS', '0'); props.setProperty('PIN_LOCKED_UNTIL', String(Date.now() + CONFIG.LOCK_MINUTES * 60 * 1000)); }
+  else props.setProperty('PIN_FAILED_ATTEMPTS', String(attempts));
+}
+function validNewPin(pin) { return new RegExp('^[0-9]{' + CONFIG.PIN_MIN_LENGTH + ',12}$').test(String(pin || '')); }
+
 function initialSetup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const props = PropertiesService.getScriptProperties();
-  if (!props.getProperty('APP_PIN')) props.setProperty('APP_PIN', CONFIG.DEFAULT_PIN);
+  migrateLegacyPin(props);
+  if (!props.getProperty('APP_PIN_HASH')) {
+    const initialPin = String(Math.floor(100000 + Math.random() * 900000));
+    setPinHash(initialPin, props);
+    Logger.log('PIN awal Lavi Growth: ' + initialPin + ' (simpan lalu ganti dari aplikasi)');
+  }
 
   const schema = CONFIG.HEADERS;
   Object.keys(schema).forEach(key => {
@@ -57,37 +86,38 @@ function initialSetup() {
 function doPost(e) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return responseJSON({ status: 'error', message: 'Server busy' });
-
   try {
     const props = PropertiesService.getScriptProperties();
-    if (!props.getProperty('APP_PIN')) initialSetup();
-
-    const postData = JSON.parse(e.postData.contents);
+    migrateLegacyPin(props);
+    if (!props.getProperty('APP_PIN_HASH')) initialSetup();
+    const postData = JSON.parse(e.postData.contents || '{}');
     const action = postData.action;
-    const clientPin = postData.pin;
-    const serverPin = props.getProperty('APP_PIN');
-
-    if (action !== 'check_pin' && String(clientPin) !== String(serverPin)) {
-      return responseJSON({ status: 'error', message: 'Invalid PIN' });
+    const clientPin = String(postData.pin || '');
+    if (action === 'health_check') return responseJSON({ status: 'success', version: '9.0' });
+    if (isPinLocked(props)) return responseJSON({ status: 'error', message: 'Terlalu banyak percobaan PIN. Coba lagi beberapa menit.' });
+    const pinValid = verifyPin(clientPin, props);
+    if (action === 'check_pin') {
+      if (pinValid) clearPinFailures(props); else recordPinFailure(props);
+      return responseJSON({ status: 'success', valid: pinValid });
     }
-
+    if (!pinValid) { recordPinFailure(props); return responseJSON({ status: 'error', message: 'Invalid PIN' }); }
+    clearPinFailures(props);
     let result;
     switch (action) {
       case 'sync_pull': result = handlePull(); break;
-      case 'sync_push': result = handlePush(postData.payload); break;
+      case 'sync_push': result = handlePush(postData.payload || {}); break;
       case 'delete_data': result = handleDelete(postData.type, postData.id); break;
       case 'upload_image': result = uploadImageToDrive(postData.fileData, postData.fileName); break;
-      case 'update_pin': props.setProperty('APP_PIN', String(postData.newPin)); result = { status: 'success' }; break;
-      case 'check_pin': result = { status: 'success', valid: String(clientPin) === String(serverPin) }; break;
+      case 'update_pin':
+        if (!validNewPin(postData.newPin)) result = { status: 'error', message: 'PIN baru harus 6-12 angka' };
+        else { setPinHash(String(postData.newPin), props); result = { status: 'success' }; }
+        break;
       case 'reset_data': result = resetAllData(); break;
       default: result = { status: 'error', message: 'Unknown Action' };
     }
     return responseJSON(result);
-  } catch (err) {
-    return responseJSON({ status: 'error', message: err.toString() });
-  } finally {
-    lock.releaseLock();
-  }
+  } catch (err) { return responseJSON({ status: 'error', message: err.toString() }); }
+  finally { lock.releaseLock(); }
 }
 
 function handlePull() {

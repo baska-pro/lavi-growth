@@ -3,45 +3,88 @@ import { AppState, HealthRecord, Profile, ProfileType, MenstrualCycle, Gender } 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { WHO_WEIGHT_BOYS, WHO_WEIGHT_GIRLS } from './data/medicalData';
+import { clearAppStateDb, clearQueueDb, loadAppStateFromDb, saveAppStateToDb } from './services/localDb';
 
-const STORAGE_KEY = 'FAMHEALTH_DATA_V1';
+const LEGACY_STORAGE_KEY = 'FAMHEALTH_DATA_V1';
+let hydratedStateCache: AppState | null | undefined;
 
-// --- ID Generator (Simple & Short) ---
+// --- ID Generator ---
 export const generateId = (): string => {
-  return Math.random().toString(36).substring(2, 10).toUpperCase();
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase();
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
 };
 
-// --- Local Storage Helpers ---
-export const loadState = (): AppState | null => {
+// --- IndexedDB State Helpers ---
+export const hydrateStateCache = async (): Promise<AppState | null> => {
+  if (hydratedStateCache !== undefined) return hydratedStateCache;
   try {
-    const serialized = localStorage.getItem(STORAGE_KEY);
-    if (!serialized) return null;
-    return JSON.parse(serialized);
-  } catch (e) {
-    console.error("Failed to load state", e);
+    const fromDb = await loadAppStateFromDb();
+    if (fromDb) {
+      hydratedStateCache = fromDb;
+      return fromDb;
+    }
+  } catch (error) {
+    console.warn('IndexedDB load failed, checking legacy storage', error);
+  }
+
+  try {
+    const serialized = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!serialized) {
+      hydratedStateCache = null;
+      return null;
+    }
+    const legacy = JSON.parse(serialized) as AppState;
+    hydratedStateCache = legacy;
+    try {
+      await saveAppStateToDb(legacy);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch (error) {
+      console.warn('Legacy state migration to IndexedDB failed', error);
+    }
+    return legacy;
+  } catch (error) {
+    console.error('Failed to load legacy state', error);
+    hydratedStateCache = null;
     return null;
   }
 };
 
-export const saveState = (state: AppState) => {
+export const loadStateAsync = hydrateStateCache;
+
+export const saveStateAsync = async (state: AppState): Promise<void> => {
+  hydratedStateCache = state;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn("Failed to save state - likely storage quota exceeded", e);
-    // Emergency recovery: prune photos from older records to save critical health data
-    try {
-      const prunedRecords = state.records.map((r, index) => {
-        if (index > 8 && r.photos && r.photos.length > 0) {
-          return { ...r, photos: [] };
-        }
-        return r;
-      });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, records: prunedRecords }));
-      console.info("State saved after pruning older cached images");
-    } catch (retryError) {
-      console.error("Storage still full after pruning", retryError);
-    }
+    await saveAppStateToDb(state);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch (error) {
+    console.error('IndexedDB save failed', error);
   }
+};
+
+// Existing synchronous App API reads the pre-hydrated in-memory cache.
+export const loadState = (): AppState | null => {
+  if (hydratedStateCache !== undefined) return hydratedStateCache;
+  try {
+    const serialized = localStorage.getItem(LEGACY_STORAGE_KEY);
+    return serialized ? JSON.parse(serialized) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const saveState = (state: AppState): void => {
+  void saveStateAsync(state);
+};
+
+export const clearLocalState = async (): Promise<void> => {
+  hydratedStateCache = null;
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
+  localStorage.removeItem('LAVI_REMINDER_FIRED');
+  localStorage.removeItem('LAVI_SYNC_QUEUE');
+  localStorage.removeItem('LAVI_SYNC_QUEUE_COUNT');
+  await Promise.allSettled([clearAppStateDb(), clearQueueDb()]);
 };
 
 // --- DYNAMIC THEME HELPER (Gender & Type Specific) ---
@@ -307,26 +350,22 @@ export const savePinRecovery = (pin: string) => {
 };
 
 export const exportData = (state: AppState) => {
-  // Create a copy and remove the PIN before exporting
-  const { pin, ...safeState } = state;
-  
-  // JSON.stringify with null, 2 for pretty printing
-  const jsonString = JSON.stringify(safeState, null, 2);
-  
-  // Create Blob with specific application/json type
-  const blob = new Blob([jsonString], { type: "application/json" });
+  const { pin, dbConfig, ...safeState } = state;
+  const backup = {
+    format: 'lavi-growth-backup',
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    data: safeState
+  };
+  const jsonString = JSON.stringify(backup, null, 2);
+  const blob = new Blob([jsonString], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  
-  const downloadAnchorNode = document.createElement('a');
-  downloadAnchorNode.setAttribute("href", url);
-  
-  // Using hyphens instead of underscores for filename
-  downloadAnchorNode.setAttribute("download", `LaviGrowth-Backup-${new Date().toISOString().split('T')[0]}.json`);
-  document.body.appendChild(downloadAnchorNode);
-  downloadAnchorNode.click();
-  downloadAnchorNode.remove();
-  
-  // Clean up the URL object
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `LaviGrowth-Backup-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   URL.revokeObjectURL(url);
 };
 

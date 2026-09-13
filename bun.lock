@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "lavi-growth-pro-v2",
+      "name": "lavi-growth",
       "dependencies": {
         "@supabase/supabase-js": "^2.116.0",
         "canvas-confetti": "1.9.2",

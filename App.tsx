@@ -7,9 +7,9 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { AppState, Profile, ProfileType, HealthRecord, Gender, METRIC_LABELS, Target, VaccineRecord, MilestoneRecord, Reminder, MenstrualCycle } from './types';
-import { loadState, saveState, exportData, calculateDetailedAge, formatDate, savePinRecovery, exportToExcel, generatePDF, generateId, calculateAge } from './utils';
+import { loadState, saveState, saveStateAsync, clearLocalState, exportData, calculateDetailedAge, formatDate, savePinRecovery, exportToExcel, generatePDF, generateId, calculateAge } from './utils';
 import { Button, Input, Modal, Toast, AvatarSelector, ConfirmationModal, LoadingOverlay } from './components/UI';
-import { pullFromCloud, pushToCloud, deleteFromCloud, checkPinOnServer, updatePinOnServer, resetServerData, processQueueFIFO, getQueueLength } from './services/api';
+import { pullFromCloud, pushToCloud, deleteFromCloud, checkPinOnServer, updatePinOnServer, resetServerData, processQueueFIFO, getQueueLength, getQueueStatus, retryFailedQueue } from './services/api';
 
 // --- Modular Component Imports ---
 import { DashboardView } from './components/features/Dashboard';
@@ -50,6 +50,7 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingItems, setPendingItems] = useState(0);
+  const [failedItems, setFailedItems] = useState(0);
 
   // Modals & Navigation
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -130,28 +131,65 @@ export default function App() {
 
   // --- NOTIFICATION LOGIC ---
   useEffect(() => {
+      let intervalId: ReturnType<typeof setInterval> | null = null;
+      const firedStorageKey = 'LAVI_REMINDER_FIRED';
+      const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+      const alreadyFired = (key: string) => {
+          try {
+              const saved = JSON.parse(localStorage.getItem(firedStorageKey) || '{}');
+              const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+              Object.keys(saved).forEach(k => { if (saved[k] < cutoff) delete saved[k]; });
+              if (saved[key]) return true;
+              saved[key] = Date.now();
+              localStorage.setItem(firedStorageKey, JSON.stringify(saved));
+              return false;
+          } catch { return false; }
+      };
+
+      const notify = async (r: Reminder) => {
+          const title = `Pengingat: ${r.title}`;
+          const body = `Waktunya untuk ${r.title}.`;
+          if (Notification.permission === 'granted') {
+              try {
+                  if ('serviceWorker' in navigator) {
+                      const registration = await navigator.serviceWorker.ready;
+                      await registration.showNotification(title, { body, icon: '/favicon.svg', badge: '/favicon.svg', tag: `lavi-reminder-${r.id}` });
+                      return;
+                  }
+                  new Notification(title, { body, icon: '/favicon.svg' });
+                  return;
+              } catch (error) { console.warn('Notification delivery failed', error); }
+          }
+          showToast(`Waktunya: ${r.title}`, 'info');
+      };
+
       const checkReminders = () => {
-          if (!state.reminders || state.reminders.length === 0) return;
+          if (!state.reminders?.length) return;
           const now = new Date();
           const currentDay = now.getDay();
-          const currentHour = String(now.getHours()).padStart(2, '0');
-          const currentMinute = String(now.getMinutes()).padStart(2, '0');
-          const currentTime = `${currentHour}:${currentMinute}`;
-
+          const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          const today = localDateKey(now);
           state.reminders.forEach(r => {
-              if (r.active && r.days.includes(currentDay) && r.time === currentTime) {
-                  if (Notification.permission === 'granted') {
-                      new Notification(`Pengingat: ${r.title}`, { body: `Waktunya untuk ${r.title}. Jaga kesehatan Anda!`, icon: '/icon.png' });
-                  } else {
-                      showToast(`Waktunya: ${r.title}`, "info");
-                  }
-              }
+              if (!r.active || r.time !== currentTime) return;
+              const matchesDate = r.specificDate ? r.specificDate === today : r.days.includes(currentDay);
+              if (!matchesDate) return;
+              const fireKey = `${r.id}:${today}:${currentTime}`;
+              if (!alreadyFired(fireKey)) void notify(r);
           });
       };
+
+      checkReminders();
       const now = new Date();
-      const delay = (60 - now.getSeconds()) * 1000;
-      const timeoutId = setTimeout(() => { checkReminders(); const intervalId = setInterval(checkReminders, 60000); return () => clearInterval(intervalId); }, delay);
-      return () => clearTimeout(timeoutId);
+      const delay = Math.max(250, (60 - now.getSeconds()) * 1000 - now.getMilliseconds());
+      const timeoutId = setTimeout(() => {
+          checkReminders();
+          intervalId = setInterval(checkReminders, 60_000);
+      }, delay);
+      return () => {
+          clearTimeout(timeoutId);
+          if (intervalId) clearInterval(intervalId);
+      };
   }, [state.reminders]);
 
   // --- PREGNANCY MODE ---
@@ -193,7 +231,10 @@ export default function App() {
     setIsSyncing(true);
     try {
         await processQueueFIFO();
-        setPendingItems(getQueueLength());
+        const queueStatus = await getQueueStatus();
+        setPendingItems(queueStatus.pending);
+        setFailedItems(queueStatus.failed);
+        if (queueStatus.total > 0) return;
         const cloudState = await pullFromCloud(pin);
         if (cloudState) {
             const sanitizedRecords = cloudState.records.map(r => {
@@ -218,9 +259,10 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     setPendingItems(getQueueLength());
+    void getQueueStatus().then(q => setFailedItems(q.failed));
     const interval = setInterval(() => { 
         if (navigator.onLine && state.pin && !syncLock.current && !state.isOfflineMode) performPullSync(state.pin); 
-    }, 10000);
+    }, 180000);
     return () => { 
         window.removeEventListener('online', handleOnline); 
         window.removeEventListener('offline', handleOffline); 
@@ -261,6 +303,19 @@ export default function App() {
       if (!navigator.onLine) return showToast("Anda sedang offline", "warning"); 
       showToast("Sinkronisasi manual dimulai...", "info"); performPullSync(state.pin); 
   };
+  const handleRetryFailedSync = async () => {
+      if (!navigator.onLine) return showToast('Anda sedang offline', 'warning');
+      setIsSyncing(true);
+      try {
+          const retried = await retryFailedQueue();
+          await processQueueFIFO();
+          const q = await getQueueStatus();
+          setPendingItems(q.pending);
+          setFailedItems(q.failed);
+          if (q.total === 0 && state.pin && !state.isOfflineMode) await performPullSync(state.pin);
+          showToast(retried > 0 ? 'Antrian gagal dicoba ulang.' : 'Tidak ada antrian gagal.', 'info');
+      } finally { setIsSyncing(false); }
+  };
   const resetProfileForm = () => { setProfileName(''); setProfileType(ProfileType.ADULT); setProfileDob(''); setProfileGender('Male'); setProfileAvatar(''); setEditingProfileId(null); };
   const handleBirth = async (pregnancyProfileId: string, babyName: string, babyGender: Gender, birthDate: string) => { setGlobalLoading("Memproses Kelahiran..."); const updatedProfiles = state.profiles.map(p => { if (p.id === pregnancyProfileId) { return { ...p, name: babyName, type: ProfileType.BABY, gender: babyGender, dob: birthDate, isPregnant: false }; } if (p.type === ProfileType.ADULT && p.gender === 'Female' && p.isPregnant) { return { ...p, isPregnant: false }; } return p; }); setState(prev => ({ ...prev, profiles: updatedProfiles, activeProfileId: pregnancyProfileId })); if (state.pin && !state.isOfflineMode) { await pushToCloud({ profiles: updatedProfiles }, state.pin); setTimeout(() => performPullSync(state.pin), 1000); } setGlobalLoading(null); setShowSuccessModal(true); showToast(`Selamat datang, ${babyName}!`, "success"); };
   const handleProfileSubmit = async () => { const dateLabel = profileType === ProfileType.PREGNANCY ? "HPHT" : "Tanggal Lahir"; if (!profileName || !profileDob) return showToast(`Nama & ${dateLabel} wajib diisi`, "error"); let finalAvatar = profileAvatar; let newProfile: Profile; let newState: AppState; if (editingProfileId) { newProfile = { id: editingProfileId, name: profileName, type: profileType, dob: profileDob, gender: profileGender, avatar: finalAvatar }; const oldProfile = state.profiles.find(p => p.id === editingProfileId); if (oldProfile) newProfile.isPregnant = oldProfile.isPregnant; newState = { ...state, profiles: state.profiles.map(p => p.id === editingProfileId ? newProfile : p) }; } else { newProfile = { id: generateId(), name: profileName, type: profileType, dob: profileDob, gender: profileGender, avatar: finalAvatar }; newState = { ...state, profiles: [...state.profiles, newProfile], activeProfileId: newProfile.id }; } setState(newState); setShowProfileModal(false); if (state.pin && !state.isOfflineMode) { await pushToCloud({ profiles: [newProfile] }, state.pin); setPendingItems(prev => prev + 1); if (isOnline) showToast("Disimpan & Sinkronisasi..."); else showToast("Disimpan Offline (Antrian)"); } else { showToast("Profil Tersimpan (Lokal)"); } };
@@ -285,7 +340,7 @@ export default function App() {
                   showToast("Record Dihapus");
               } else if (securityAction === 'delete_profile') { 
                   const newProfiles = state.profiles.filter(p => p.id !== targetId); 
-                  const newState = { ...state, profiles: newProfiles, records: state.records.filter(r => r.profileId !== targetId), activeProfileId: newProfiles[0]?.id || null }; 
+                  const newState = { ...state, profiles: newProfiles, records: state.records.filter(r => r.profileId !== targetId), vaccines: (state.vaccines || []).filter(v => v.profileId !== targetId), milestones: (state.milestones || []).filter(m => m.profileId !== targetId), targets: (state.targets || []).filter(t => t.profileId !== targetId), reminders: (state.reminders || []).filter(r => r.profileId !== targetId), menstrualCycles: (state.menstrualCycles || []).filter(c => c.profileId !== targetId), activeProfileId: newProfiles[0]?.id || null }; 
                   setState(newState); 
                   await doDelete('profile', targetId);
                   showToast("Profil Dihapus");
@@ -311,8 +366,80 @@ export default function App() {
       } 
   };
 
-  const confirmImport = async () => { if(!importPreview) return; setGlobalLoading("Mengimpor & Menggabungkan Data..."); const newState = { ...importPreview, pin: state.pin, isOfflineMode: state.isOfflineMode }; if (state.pin && !state.isOfflineMode) { await pushToCloud({ profiles: importPreview.profiles, records: importPreview.records, vaccines: importPreview.vaccines, milestones: importPreview.milestones }, state.pin); await performPullSync(state.pin); showToast("Data Diimpor & Masuk Antrian Sync!"); } else { setState(newState); showToast("Data Berhasil Diimpor (Lokal)"); } setGlobalLoading(null); setImportPreview(null); };
-  const handleDirectLogin = async () => { if (!pinInput) return; setGlobalLoading("Verifikasi & Mengunduh Data..."); const isValid = await checkPinOnServer(pinInput); if (isValid) { const cloudState = await pullFromCloud(pinInput); if (cloudState) { const hasProfiles = cloudState.profiles && cloudState.profiles.length > 0; const newActiveId = hasProfiles ? cloudState.profiles[0].id : null; const fixRecords = (recs: any[]) => recs.map(r => { if(!r.timestamp) { const t = r.time || "23:59"; return {...r, timestamp: new Date(`${r.date}T${t}`).getTime() }; } return r; }); setState({ ...state, pin: pinInput, profiles: cloudState.profiles, records: fixRecords(cloudState.records), vaccines: cloudState.vaccines, milestones: cloudState.milestones, targets: cloudState.targets || [], reminders: cloudState.reminders || [], menstrualCycles: cloudState.menstrualCycles || [], activeProfileId: newActiveId, lastSyncTime: Date.now() }); saveState(state); setShowLoginModal(false); setPinInput(''); showToast("Berhasil Masuk & Data Tersinkron!", "success"); } else { showToast("PIN Benar tapi Gagal Sync Data.", "warning"); } } else { showToast("PIN Salah.", "error"); } setGlobalLoading(null); };
+  const confirmImport = async () => {
+      if (!importPreview) return;
+      setGlobalLoading('Mengimpor & Memvalidasi Data...');
+      const importedState: AppState = {
+          ...initialState,
+          profiles: importPreview.profiles,
+          records: importPreview.records,
+          vaccines: importPreview.vaccines,
+          milestones: importPreview.milestones,
+          targets: importPreview.targets,
+          reminders: importPreview.reminders,
+          menstrualCycles: importPreview.menstrualCycles,
+          activeProfileId: importPreview.activeProfileId,
+          darkMode: importPreview.darkMode,
+          pin: state.pin,
+          isOfflineMode: state.isOfflineMode
+      };
+      setState(importedState);
+      await saveStateAsync(importedState);
+      if (state.pin && !state.isOfflineMode) {
+          await pushToCloud({ profiles: importedState.profiles, records: importedState.records, vaccines: importedState.vaccines, milestones: importedState.milestones, targets: importedState.targets, reminders: importedState.reminders, menstrualCycles: importedState.menstrualCycles }, state.pin);
+          const q = await getQueueStatus();
+          setPendingItems(q.pending);
+          setFailedItems(q.failed);
+          showToast(q.total === 0 ? 'Data berhasil diimpor dan tersinkron.' : 'Data berhasil diimpor. Sinkronisasi masuk antrian.', q.failed ? 'warning' : 'success');
+      } else {
+          showToast('Data berhasil diimpor ke penyimpanan lokal.', 'success');
+      }
+      setGlobalLoading(null);
+      setImportPreview(null);
+  };
+  const handleDirectLogin = async () => {
+      if (!/^\d{4,12}$/.test(pinInput)) return showToast('PIN harus berupa 4-12 angka.', 'error');
+      const loginPin = pinInput;
+      setGlobalLoading('Verifikasi & Mengunduh Data...');
+      try {
+          const isValid = await checkPinOnServer(loginPin);
+          if (!isValid) {
+              showToast('PIN salah atau akses sedang dibatasi sementara.', 'error');
+              return;
+          }
+          const cloudState = await pullFromCloud(loginPin);
+          if (!cloudState) {
+              showToast('PIN benar tetapi data cloud gagal diambil.', 'warning');
+              return;
+          }
+          const fixedRecords = cloudState.records.map(r => {
+              if (r.timestamp) return r;
+              const t = r.time || '23:59';
+              const timestamp = new Date(`${r.date}T${t}`).getTime();
+              return { ...r, timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp };
+          });
+          const nextState: AppState = {
+              ...state,
+              pin: loginPin,
+              profiles: cloudState.profiles,
+              records: fixedRecords,
+              vaccines: cloudState.vaccines,
+              milestones: cloudState.milestones,
+              targets: cloudState.targets || [],
+              reminders: cloudState.reminders || [],
+              menstrualCycles: cloudState.menstrualCycles || [],
+              activeProfileId: cloudState.profiles[0]?.id || null,
+              lastSyncTime: Date.now()
+          };
+          setState(nextState);
+          await saveStateAsync(nextState);
+          setShowLoginModal(false);
+          setPinInput('');
+          showToast('Berhasil Masuk & Data Tersinkron!', 'success');
+      } finally {
+          setGlobalLoading(null);
+      }
+  };
   const handlePinUpdate = async (newPin: string, oldPin: string): Promise<boolean> => { const success = await updatePinOnServer(newPin, oldPin); if (success) { setState(prev => ({ ...prev, pin: newPin, lastSyncTime: Date.now() })); savePinRecovery(newPin); showToast("PIN Berhasil Diupdate!", "success"); return true; } else { showToast("PIN Lama Salah atau Server Error", "error"); return false; } };
   
   // --- UPDATED TARGET LOGIC (Supports Edit) ---
@@ -353,18 +480,51 @@ export default function App() {
   const requestDeleteReminder = (id: string) => { if(!state.pin) return showToast("Set PIN dulu", "error"); setSecurityAction('delete_reminder'); setTargetId(id); setShowPinModal(true); };
   const requestDeleteTarget = (id: string) => { if(!state.pin) return showToast("Set PIN dulu", "error"); setSecurityAction('delete_target'); setTargetId(id); setShowPinModal(true); };
   const handleToggleOfflineMode = () => { const newStatus = !state.isOfflineMode; setState(prev => ({ ...prev, isOfflineMode: newStatus })); showToast(newStatus ? "Mode Offline Diaktifkan (Hemat Data)" : "Mode Online (Auto Sync)", "info"); if (!newStatus && navigator.onLine && state.pin) { setTimeout(() => performPullSync(state.pin), 500); } };
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const fileReader = new FileReader(); if(e.target.files && e.target.files[0]) { fileReader.readAsText(e.target.files[0], "UTF-8"); fileReader.onload = (event) => { try { const parsed = JSON.parse(event.target?.result as string); if(parsed.profiles) { setImportPreview(parsed); } else { showToast("Format file tidak valid", "error"); } } catch(err) { showToast("File rusak atau tidak valid", "error"); } }; e.target.value = ''; } };
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      if (file.size > 25 * 1024 * 1024) return showToast('File backup terlalu besar (maks. 25 MB).', 'error');
+      const fileReader = new FileReader();
+      fileReader.readAsText(file, 'UTF-8');
+      fileReader.onload = event => {
+          try {
+              const raw = JSON.parse(event.target?.result as string);
+              const parsed = raw?.format === 'lavi-growth-backup' ? raw.data : raw;
+              if (!parsed || !Array.isArray(parsed.profiles) || !Array.isArray(parsed.records)) return showToast('Format backup tidak valid.', 'error');
+              setImportPreview({
+                  profiles: parsed.profiles,
+                  records: parsed.records,
+                  vaccines: Array.isArray(parsed.vaccines) ? parsed.vaccines : [],
+                  milestones: Array.isArray(parsed.milestones) ? parsed.milestones : [],
+                  targets: Array.isArray(parsed.targets) ? parsed.targets : [],
+                  reminders: Array.isArray(parsed.reminders) ? parsed.reminders : [],
+                  menstrualCycles: Array.isArray(parsed.menstrualCycles) ? parsed.menstrualCycles : [],
+                  activeProfileId: parsed.activeProfileId || parsed.profiles[0]?.id || null,
+                  darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : state.darkMode
+              });
+          } catch { showToast('File rusak atau tidak valid.', 'error'); }
+      };
+  };
   const handleExport = () => { setGlobalLoading("Menyiapkan Backup..."); setTimeout(() => { exportData(state); setGlobalLoading(null); showToast("File Backup Didownload"); }, 1000); };
   const handlePDFExport = () => { const profile = state.profiles.find(p => p.id === state.activeProfileId); if (!profile) { showToast("Pilih profil terlebih dahulu", "error"); return; } setGlobalLoading("Membuat PDF..."); setTimeout(() => { const profileRecords = state.records.filter(r => r.profileId === profile.id); const profileVaccines = state.vaccines?.filter(v => v.profileId === profile.id); generatePDF(profile, profileRecords, profileVaccines); setGlobalLoading(null); showToast("PDF Berhasil Dibuat"); }, 500); };
   const handleHardResetTrigger = () => { setShowSettingsModal(false); setTimeout(() => setShowResetPinModal(true), 300); };
-  const verifyResetPin = async () => { setGlobalLoading("Verifikasi PIN..."); let isValid = false; if (pinInput === state.pin || pinInput === "0000") isValid = true; else { const serverValid = await checkPinOnServer(pinInput); if (serverValid) isValid = true; } setGlobalLoading(null); if (isValid) { setShowResetPinModal(false); setPinInput(''); setShowResetConfirmModal(true); } else { showToast("PIN Salah.", "error"); } };
-  const executeHardReset = async () => { setGlobalLoading("Mereset Aplikasi..."); localStorage.removeItem('FAMHEALTH_DATA_V1'); localStorage.removeItem('LAVI_SYNC_QUEUE'); setState(initialState); setGlobalLoading(null); setShowResetConfirmModal(false); showToast("Aplikasi direset.", "success"); setTimeout(() => window.location.reload(), 1500); };
+  const verifyResetPin = async () => { setGlobalLoading("Verifikasi PIN..."); let isValid = false; if (pinInput === state.pin) isValid = true; else { const serverValid = await checkPinOnServer(pinInput); if (serverValid) isValid = true; } setGlobalLoading(null); if (isValid) { setShowResetPinModal(false); setPinInput(''); setShowResetConfirmModal(true); } else { showToast("PIN Salah.", "error"); } };
+  const executeHardReset = async () => {
+      setGlobalLoading('Mereset Aplikasi...');
+      await clearLocalState();
+      setState(initialState);
+      setGlobalLoading(null);
+      setShowResetConfirmModal(false);
+      showToast('Data lokal aplikasi direset.', 'success');
+      setTimeout(() => window.location.reload(), 1000);
+  };
 
   if (!isLoaded) return null;
   const activeProfile = state.profiles.find(p => p.id === state.activeProfileId);
   const strictSortedRecords = state.records.filter(r => r.profileId === state.activeProfileId).sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  if (!state.profiles || state.profiles.length === 0) { return ( <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4"> {globalLoading && <LoadingOverlay message={globalLoading} />} <AnimatePresence>{toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}</AnimatePresence> <ConfirmationModal isOpen={!!importPreview} title="Konfirmasi Import Data" message={importPreview ? `File mengandung ${importPreview.profiles?.length} profil. Lanjutkan?` : ""} confirmText="Ya, Import & Sync" onConfirm={confirmImport} onCancel={() => setImportPreview(null)} /> <Modal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} title="Masuk / Sinkronisasi"> <div className="space-y-4"> <p className="text-sm text-gray-600 dark:text-gray-300 text-center">Masukkan PIN Aplikasi dari Google Apps Script.</p> <Input label="PIN" type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} className="text-center" /> <Button onClick={handleDirectLogin} className="w-full">Masuk & Sync</Button> </div> </Modal> <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-3xl shadow-xl p-8 text-center space-y-6"> <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900 rounded-full flex items-center justify-center mx-auto text-emerald-600"><Activity size={40} /></div> <div><h1 className="text-3xl font-bold mb-1"><span className="text-emerald-500">Lavi</span> <span className="text-blue-500">Growth</span></h1></div> <div className="text-left space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-700"> {state.pin ? <div className="p-2 mb-2 bg-emerald-50 text-emerald-700 text-sm rounded-lg text-center font-semibold">Login Berhasil! Buat profil pertama.</div> : null} <Input label="Nama" value={profileName} onChange={e => setProfileName(e.target.value)} /> <Input label="Tgl Lahir" type="date" value={profileDob} onChange={e => setProfileDob(e.target.value)} /> <div className="flex flex-col gap-1.5"> <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Kategori</label> <select className="w-full bg-white border border-gray-200 rounded-xl py-2 px-4" value={profileType} onChange={(e) => setProfileType(e.target.value as ProfileType)}>{Object.values(ProfileType).map(t => <option key={t} value={t}>{t}</option>)}</select> </div> <div className="flex gap-4"><label className="flex items-center gap-2"><input type="radio" checked={profileGender === 'Male'} onChange={() => setProfileGender('Male')} /> Pria</label><label className="flex items-center gap-2"><input type="radio" checked={profileGender === 'Female'} onChange={() => setProfileGender('Female')} /> Wanita</label></div> {!showWelcomeAvatar ? <button onClick={() => setShowWelcomeAvatar(true)} className="w-full mt-2 py-3 border border-dashed rounded-xl text-sm flex justify-center gap-2"><IconImage size={16} /> Pilih Avatar</button> : <AvatarSelector selected={profileAvatar} onSelect={setProfileAvatar} />} </div> <div className="space-y-3"> <Button onClick={handleProfileSubmit} className="w-full">Buat Profil Pertama</Button> {!state.pin && ( <> <div className="relative flex items-center py-2"><div className="flex-grow border-t"></div><span className="mx-4 text-xs text-gray-400">ATAU</span><div className="flex-grow border-t"></div></div> <div className="grid grid-cols-2 gap-3"> <Button variant="secondary" onClick={() => setShowLoginModal(true)} className="text-sm"><Cloud size={16} /> Masuk / Sync</Button> <label className="relative w-full bg-white border-2 border-dashed border-emerald-200 text-emerald-600 rounded-xl py-2 font-medium flex items-center justify-center gap-2 cursor-pointer text-sm"><Upload size={16} /> Restore File<input type="file" onChange={handleFileSelect} className="hidden" accept=".json,application/json" /></label> </div> </> )} {state.pin && ( <label className="relative w-full bg-white border-2 border-dashed border-gray-200 text-gray-600 rounded-xl py-2 font-medium flex items-center justify-center gap-2 cursor-pointer text-sm mt-2"><Upload size={16} /> Import Backup File (JSON)<input type="file" onChange={handleFileSelect} className="hidden" accept=".json,application/json" /></label> )} </div> </div> </div> ); }
+  if (!state.profiles || state.profiles.length === 0) { return ( <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4"> {globalLoading && <LoadingOverlay message={globalLoading} />} <AnimatePresence>{toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}</AnimatePresence> <ConfirmationModal isOpen={!!importPreview} title="Konfirmasi Import Data" message={importPreview ? `File mengandung ${importPreview.profiles?.length} profil. Lanjutkan?` : ""} confirmText="Ya, Import & Sync" onConfirm={confirmImport} onCancel={() => setImportPreview(null)} /> <Modal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} title="Masuk / Sinkronisasi"> <div className="space-y-4"> <p className="text-sm text-gray-600 dark:text-gray-300 text-center">Masukkan PIN backend cloud Anda.</p> <Input label="PIN" type="password" value={pinInput} onChange={e => setPinInput(e.target.value)} className="text-center" /> <Button onClick={handleDirectLogin} className="w-full">Masuk & Sync</Button> </div> </Modal> <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-3xl shadow-xl p-8 text-center space-y-6"> <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900 rounded-full flex items-center justify-center mx-auto text-emerald-600"><Activity size={40} /></div> <div><h1 className="text-3xl font-bold mb-1"><span className="text-emerald-500">Lavi</span> <span className="text-blue-500">Growth</span></h1></div> <div className="text-left space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-700"> {state.pin ? <div className="p-2 mb-2 bg-emerald-50 text-emerald-700 text-sm rounded-lg text-center font-semibold">Login Berhasil! Buat profil pertama.</div> : null} <Input label="Nama" value={profileName} onChange={e => setProfileName(e.target.value)} /> <Input label="Tgl Lahir" type="date" value={profileDob} onChange={e => setProfileDob(e.target.value)} /> <div className="flex flex-col gap-1.5"> <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Kategori</label> <select className="w-full bg-white border border-gray-200 rounded-xl py-2 px-4" value={profileType} onChange={(e) => setProfileType(e.target.value as ProfileType)}>{Object.values(ProfileType).map(t => <option key={t} value={t}>{t}</option>)}</select> </div> <div className="flex gap-4"><label className="flex items-center gap-2"><input type="radio" checked={profileGender === 'Male'} onChange={() => setProfileGender('Male')} /> Pria</label><label className="flex items-center gap-2"><input type="radio" checked={profileGender === 'Female'} onChange={() => setProfileGender('Female')} /> Wanita</label></div> {!showWelcomeAvatar ? <button onClick={() => setShowWelcomeAvatar(true)} className="w-full mt-2 py-3 border border-dashed rounded-xl text-sm flex justify-center gap-2"><IconImage size={16} /> Pilih Avatar</button> : <AvatarSelector selected={profileAvatar} onSelect={setProfileAvatar} />} </div> <div className="space-y-3"> <Button onClick={handleProfileSubmit} className="w-full">Buat Profil Pertama</Button> {!state.pin && ( <> <div className="relative flex items-center py-2"><div className="flex-grow border-t"></div><span className="mx-4 text-xs text-gray-400">ATAU</span><div className="flex-grow border-t"></div></div> <div className="grid grid-cols-2 gap-3"> <Button variant="secondary" onClick={() => setShowLoginModal(true)} className="text-sm"><Cloud size={16} /> Masuk / Sync</Button> <label className="relative w-full bg-white border-2 border-dashed border-emerald-200 text-emerald-600 rounded-xl py-2 font-medium flex items-center justify-center gap-2 cursor-pointer text-sm"><Upload size={16} /> Restore File<input type="file" onChange={handleFileSelect} className="hidden" accept=".json,application/json" /></label> </div> </> )} {state.pin && ( <label className="relative w-full bg-white border-2 border-dashed border-gray-200 text-gray-600 rounded-xl py-2 font-medium flex items-center justify-center gap-2 cursor-pointer text-sm mt-2"><Upload size={16} /> Import Backup File (JSON)<input type="file" onChange={handleFileSelect} className="hidden" accept=".json,application/json" /></label> )} </div> </div> </div> ); }
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-300">
@@ -373,6 +533,7 @@ export default function App() {
       {!isOnline && ( <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] bg-gray-800 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg"> <WifiOff size={14} /> Offline (No Internet) </div> )}
       {state.isOfflineMode && ( <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] bg-purple-600 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg"> <Lock size={14} /> Mode Offline Aktif </div> )}
       {pendingItems > 0 && isOnline && !state.isOfflineMode && ( <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] bg-blue-600 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg"> <RefreshCw size={14} className="animate-spin" /> Menyinkronkan {pendingItems} item... </div> )}
+      {failedItems > 0 && isOnline && !state.isOfflineMode && ( <button onClick={handleRetryFailedSync} className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[91] bg-red-600 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg"> <AlertTriangle size={14} /> {failedItems} sync gagal · Coba lagi </button> )}
       <ConfirmationModal isOpen={!!importPreview} title="Konfirmasi Import" message={importPreview ? `File mengandung ${importPreview.profiles?.length} profil. Lanjutkan?` : ""} confirmText="Ya, Import & Sync" onConfirm={confirmImport} onCancel={() => setImportPreview(null)} />
       {targetAlert && ( <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"> <div className="bg-white p-6 rounded-2xl max-w-sm text-center"> <h3 className="text-xl font-bold mb-2">Target Tercapai!</h3> <p className="mb-4">{targetAlert.message}</p> <Button variant="secondary" onClick={() => setTargetAlert(null)} className="flex-1">Tutup</Button> </div> </div> )}
       <Modal isOpen={showSuccessModal} onClose={() => setShowSuccessModal(false)} title="Berhasil Disimpan!"> <div className="text-center space-y-4"> <CheckCircle size={48} className="text-emerald-500 mx-auto" /> <p>Data kesehatan berhasil dicatat.</p> {pendingItems > 0 && !state.isOfflineMode && <p className="text-xs text-gray-500">Menunggu sinkronisasi ke cloud ({pendingItems} antrian)...</p>} <Button onClick={() => setShowSuccessModal(false)} className="w-full">Tutup</Button> </div> </Modal>
