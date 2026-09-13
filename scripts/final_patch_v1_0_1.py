@@ -17,10 +17,9 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# Fix cloud login so the exact freshly-synced state is persisted, not stale React state.
 p = 'App.tsx'
 text = read(p)
-pattern = r"  const handleDirectLogin = async \(\) => \{.*?\n  const handlePinUpdate = async"
+pattern = r"  const handleDirectLogin = async \(\) => \{.*?  const handlePinUpdate = async"
 replacement = r'''  const handleDirectLogin = async () => {
       if (!/^\d{4,12}$/.test(pinInput)) return showToast('PIN harus berupa 4-12 angka.', 'error');
       const loginPin = pinInput;
@@ -31,20 +30,17 @@ replacement = r'''  const handleDirectLogin = async () => {
               showToast('PIN salah atau akses sedang dibatasi sementara.', 'error');
               return;
           }
-
           const cloudState = await pullFromCloud(loginPin);
           if (!cloudState) {
               showToast('PIN benar tetapi data cloud gagal diambil.', 'warning');
               return;
           }
-
           const fixedRecords = cloudState.records.map(r => {
               if (r.timestamp) return r;
               const t = r.time || '23:59';
               const timestamp = new Date(`${r.date}T${t}`).getTime();
               return { ...r, timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp };
           });
-
           const nextState: AppState = {
               ...state,
               pin: loginPin,
@@ -58,7 +54,6 @@ replacement = r'''  const handleDirectLogin = async () => {
               activeProfileId: cloudState.profiles[0]?.id || null,
               lastSyncTime: Date.now()
           };
-
           setState(nextState);
           await saveStateAsync(nextState);
           setShowLoginModal(false);
@@ -75,7 +70,6 @@ if count != 1:
 text = text.replace('Masukkan PIN Aplikasi dari Google Apps Script.', 'Masukkan PIN backend cloud Anda.')
 write(p, text)
 
-# Hard reset must remove legacy queue/counter too.
 p = 'utils.ts'
 text = read(p)
 text = replace_once(
@@ -86,6 +80,5 @@ text = replace_once(
 )
 write(p, text)
 
-# Remove one-shot migration artifacts from the resulting branch.
 Path('scripts/final_patch_v1_0_1.py').unlink()
 Path('.github/workflows/final-patch-v1.0.1.yml').unlink()
