@@ -82,6 +82,8 @@ export const clearLocalState = async (): Promise<void> => {
   hydratedStateCache = null;
   localStorage.removeItem(LEGACY_STORAGE_KEY);
   localStorage.removeItem('LAVI_REMINDER_FIRED');
+  localStorage.removeItem('LAVI_SYNC_QUEUE');
+  localStorage.removeItem('LAVI_SYNC_QUEUE_COUNT');
   await Promise.allSettled([clearAppStateDb(), clearQueueDb()]);
 };
 
