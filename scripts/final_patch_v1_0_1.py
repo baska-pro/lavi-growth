@@ -64,7 +64,7 @@ replacement = r'''  const handleDirectLogin = async () => {
       }
   };
   const handlePinUpdate = async'''
-text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+text, count = re.subn(pattern, lambda _m: replacement, text, count=1, flags=re.S)
 if count != 1:
     raise RuntimeError(f'handleDirectLogin replacement count={count}')
 text = text.replace('Masukkan PIN Aplikasi dari Google Apps Script.', 'Masukkan PIN backend cloud Anda.')
