@@ -21,10 +21,13 @@ Format mengikuti prinsip [Keep a Changelog](https://keepachangelog.com/en/1.1.0/
 - Metadata HTML dan SEO dibersihkan dan disesuaikan dengan fungsi aplikasi.
 - Dokumentasi lama dipindahkan ke struktur `docs/`.
 - `.gitignore` diperketat untuk environment file, cache, deployment state, dan file temporer.
+- Backend Google Apps Script tidak lagi menggunakan endpoint deployment yang tertanam di source; URL sinkronisasi harus dikonfigurasi oleh pengguna.
+- Operasi sinkronisasi GAS sekarang berhenti dengan aman ketika endpoint belum dikonfigurasi.
 
 ### Removed
 
 - Metadata dan dokumentasi bootstrap yang tidak terkait dengan fungsi inti aplikasi.
+- URL backend Google Apps Script aktif dari source publik.
 
 ## [0.1.0] - 2026-09-13
 
