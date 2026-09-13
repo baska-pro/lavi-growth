@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Lavi Growth</title>
+  <desc id="desc">Family health tracker repository banner</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#022c22"/>
+      <stop offset="0.55" stop-color="#047857"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.75" cy="0.25" r="0.65">
+      <stop offset="0" stop-color="#a7f3d0" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#a7f3d0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="420" rx="32" fill="url(#bg)"/>
+  <rect width="1200" height="420" rx="32" fill="url(#glow)"/>
+  <g opacity="0.18" fill="none" stroke="#d1fae5" stroke-width="2">
+    <circle cx="1035" cy="78" r="150"/>
+    <circle cx="1035" cy="78" r="110"/>
+    <circle cx="1035" cy="78" r="70"/>
+  </g>
+  <g transform="translate(92 105)">
+    <rect width="104" height="104" rx="28" fill="#ecfdf5" fill-opacity="0.98"/>
+    <path d="M52 78C33 65 20 54 20 38c0-12 9-21 21-21 6 0 12 3 16 8 4-5 10-8 16-8 12 0 21 9 21 21 0 16-13 27-42 40Z" fill="#059669"/>
+    <path d="M30 49h14l6-14 9 29 7-15h14" fill="none" stroke="#ecfdf5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="230" y="176" fill="#ffffff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="62" font-weight="700">Lavi Growth</text>
+  <text x="232" y="224" fill="#d1fae5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="25">Family health tracker • local-first • self-managed sync</text>
+  <g transform="translate(232 274)" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" font-weight="600">
+    <rect x="0" y="0" width="112" height="36" rx="18" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="56" y="23" fill="#ecfdf5" text-anchor="middle">React 19</text>
+    <rect x="126" y="0" width="132" height="36" rx="18" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="192" y="23" fill="#ecfdf5" text-anchor="middle">TypeScript</text>
+    <rect x="272" y="0" width="106" height="36" rx="18" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="325" y="23" fill="#ecfdf5" text-anchor="middle">Vite</text>
+    <rect x="392" y="0" width="156" height="36" rx="18" fill="#ffffff" fill-opacity="0.14"/>
+    <text x="470" y="23" fill="#ecfdf5" text-anchor="middle">Health Tracking</text>
+  </g>
+</svg>
